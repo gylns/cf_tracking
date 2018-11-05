@@ -48,15 +48,16 @@ if(CMAKE_COMPILER_IS_GNUCC)
 endif(CMAKE_COMPILER_IS_GNUCC)
 
 # add OpenCV
-set(OPENCV_DIR_HINT "")
+#set(OPENCV_DIR_HINT "")
 
-if(WIN32)
-    get_filename_component(OPENCV_DIR_PLATFORM $ENV{OPENCV_DIR} DIRECTORY)
-    get_filename_component(OPENCV_DIR_HINT ${OPENCV_DIR_PLATFORM} DIRECTORY)
-endif(WIN32)
+#if(WIN32)
+#    get_filename_component(OPENCV_DIR_PLATFORM $ENV{OPENCV_DIR} DIRECTORY)
+#    get_filename_component(OPENCV_DIR_HINT ${OPENCV_DIR_PLATFORM} DIRECTORY)
+#endif(WIN32)
 
 set(OpenCV_STATIC OFF)
-find_package(OpenCV REQUIRED HINTS ${OPENCV_DIR_HINT})
+#find_package(OpenCV REQUIRED HINTS ${OPENCV_DIR_HINT})
+find_package(OpenCV)
 
 # add 3rdparty source
 set(CF_TCLAP_DIR "src/3rdparty/tclap")

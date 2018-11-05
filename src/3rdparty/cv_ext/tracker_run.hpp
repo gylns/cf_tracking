@@ -81,7 +81,7 @@ struct Parameters{
 class TrackerRun
 {
 public:
-    TrackerRun(std::string windowTitle);
+    TrackerRun(std::string windowTitle, ImageAcquisition& cap);
     virtual ~TrackerRun();
     bool start(int argc, const char** argv);
     void setTrackerDebug(cf_tracking::TrackerDebug* debug);
@@ -101,7 +101,7 @@ private:
     std::string _windowTitle;
     Parameters _paras;
     cv::Rect_<double> _boundingBox;
-    ImageAcquisition _cap;
+    ImageAcquisition& _cap;
     std::ofstream _resultsFile;
     TCLAP::CmdLine _cmd;
     cf_tracking::TrackerDebug* _debug;

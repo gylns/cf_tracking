@@ -37,7 +37,7 @@
 class DsstTrackerRun : public TrackerRun
 {
 public:
-    DsstTrackerRun() : TrackerRun("DSSTcpp")
+    DsstTrackerRun(ImageAcquisition& cap) : TrackerRun("DSSTcpp", cap)
     {}
 
     virtual ~DsstTrackerRun()
@@ -130,7 +130,15 @@ private:
 
 int main(int argc, const char** argv)
 {
-    DsstTrackerRun mainObj;
+	ImageAcquisition cap;
+	ImgAcqParas paras;
+	TCLAP::CmdLine cmd("DSST");
+	TCLAP::ValueArg<std::string> seqPathArg("s", "seq", "Path to sequence", false, "", "path", cmd);
+	cmd.parse(argc, argv);
+	paras.sequencePath = seqPathArg.getValue();
+	cap.open(paras);
+
+    DsstTrackerRun mainObj(cap);
 
     if (!mainObj.start(argc, argv))
         return -1;

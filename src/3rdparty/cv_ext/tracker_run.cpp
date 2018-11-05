@@ -65,10 +65,11 @@ using namespace std;
 using namespace TCLAP;
 using namespace cf_tracking;
 
-TrackerRun::TrackerRun(string windowTitle) :
+TrackerRun::TrackerRun(string windowTitle, ImageAcquisition& cap) :
 _windowTitle(windowTitle),
 _cmd(_windowTitle.c_str(), ' ', "0.1"),
-_debug(0)
+_debug(0),
+_cap(cap)
 {
     _tracker = 0;
 }
@@ -177,12 +178,15 @@ bool TrackerRun::start(int argc, const char** argv)
 
 bool TrackerRun::init()
 {
-    ImgAcqParas imgAcqParas;
-    imgAcqParas.device = _paras.device;
-    imgAcqParas.expansionStr = _paras.expansion;
-    imgAcqParas.isMock = _paras.isMockSequence;
-    imgAcqParas.sequencePath = _paras.sequencePath;
-    _cap.open(imgAcqParas);
+	if (!_cap.isOpened())
+	{
+		ImgAcqParas imgAcqParas;
+		imgAcqParas.device = _paras.device;
+		imgAcqParas.expansionStr = _paras.expansion;
+		imgAcqParas.isMock = _paras.isMockSequence;
+		imgAcqParas.sequencePath = _paras.sequencePath;
+		_cap.open(imgAcqParas);
+	}
 
     if (!_cap.isOpened())
     {

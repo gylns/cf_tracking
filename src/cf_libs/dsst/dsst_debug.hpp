@@ -66,20 +66,21 @@ namespace cf_tracking
 
         virtual void printOnImage(cv::Mat& image)
         {
-            _ss.str("");
-            _ss.clear();
-            _ss << "Max Response: " << _maxResponse;
-            putText(image, _ss.str(), cv::Point(20, 40), cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(255, 0, 0));
+            std::stringstream ss;
+            ss.str("");
+            ss.clear();
+            ss << "Max Response: " << _maxResponse;
+            putText(image, ss.str(), cv::Point(20, 40), cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(255, 0, 0));
 
-            _ss.str("");
-            _ss.clear();
-            _ss << "PSR Clamped: " << _psrClamped;
-            putText(image, _ss.str(), cv::Point(20, 80), cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(255, 0, 0));
+            ss.str("");
+            ss.clear();
+            ss << "PSR Clamped: " << _psrClamped;
+            putText(image, ss.str(), cv::Point(20, 80), cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(255, 0, 0));
 
-            _ss.str("");
-            _ss.clear();
-            _ss << "Area: " << _targetSizeArea;
-            putText(image, _ss.str(), cv::Point(image.cols - 100, 80), cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(255, 0, 0));
+            ss.str("");
+            ss.clear();
+            ss << "Area: " << _targetSizeArea;
+            putText(image, ss.str(), cv::Point(image.cols - 100, 80), cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(255, 0, 0));
         }
 
         virtual void printConsoleOutput()
@@ -119,7 +120,6 @@ namespace cf_tracking
         double _maxResponse;
         double _psrClamped;
         T _targetSizeArea;
-        std::stringstream _ss;
         std::ofstream _outputFile;
     };
 }

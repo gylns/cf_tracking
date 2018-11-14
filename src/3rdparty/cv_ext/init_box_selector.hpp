@@ -59,7 +59,7 @@
 class InitBoxSelector
 {
 public:
-    static bool selectBox(cv::Mat& frame, cv::Rect& initBox);
+	static bool selectBox(cv::Mat& frame, cv::Rect& initBox, std::vector<cv::Rect>& boxes = std::vector<cv::Rect>());
 
 private:
     static void onMouse(int event, int x, int y, int, void*);

@@ -59,50 +59,59 @@
 
 #include "init_box_selector.hpp"
 #include "cf_tracker.hpp"
+#include <windows.h>
 
 using namespace cv;
 using namespace std;
 using namespace TCLAP;
 using namespace cf_tracking;
 
-TrackerRun::TrackerRun(string windowTitle, ImageAcquisition& cap) :
+
+TrackerRun::TrackerRun(ImageAcquisition& cap, size_t n, std::string windowTitle):
 _windowTitle(windowTitle),
 _cmd(_windowTitle.c_str(), ' ', "0.1"),
 _debug(0),
-_cap(cap)
+_cap(cap),
+_cnt(0),
+_trackers(n)
 {
-    _tracker = 0;
+	startTrackers();
+}
+
+
+TrackerRun::TrackerRun(ImageAcquisition& cap, std::vector<cv::Rect>& boxes, string windowTitle) :
+TrackerRun(cap, boxes.size(), windowTitle)
+{
+	_paras.initBbs = boxes;
 }
 
 TrackerRun::~TrackerRun()
 {
     if (_resultsFile.is_open())
         _resultsFile.close();
-
-    if (_tracker)
-    {
-        delete _tracker;
-        _tracker = 0;
-    }
+	stopTrackers();
+	cv::destroyAllWindows();
 }
 
 Parameters TrackerRun::parseCmdArgs(int argc, const char** argv)
 {
-    Parameters paras;
+    Parameters& paras = _paras;
 
     try{
         ValueArg<int> deviceIdArg("c", "cam", "Camera device id", false, 0, "integer", _cmd);
         ValueArg<string> seqPathArg("s", "seq", "Path to sequence", false, "", "path", _cmd);
         ValueArg<string> expansionArg("i", "image_name_expansion", "image name expansion (only necessary for image sequences) ie. /%.05d.jpg", false, "", "string", _cmd);
-        ValueArg<string> initBbArg("b", "box", "Init Bounding Box", false, "-1,-1,-1,-1", "x,y,w,h", _cmd);
+        MultiArg<string> initBbArg("b", "box", "Init Bounding Box", false, "x,y,w,h", _cmd);
         SwitchArg noShowOutputSw("n", "no-show", "Don't show video", _cmd, false);
+        SwitchArg noSaveVideoSw("", "no_video", "Don't save video", _cmd, false);
+        ValueArg<double> videoScaleArg("", "video_scale", "the scale of saved video", false, 0.5, "double", _cmd);
         ValueArg<string> outputPathArg("o", "out", "Path to output file", false, "", "file path", _cmd);
         ValueArg<string> imgExportPathArg("e", "export", "Path to output folder where the images will be saved with BB", false, "", "folder path", _cmd);
         SwitchArg pausedSw("p", "paused", "Start paused", _cmd, false);
         SwitchArg repeatSw("r", "repeat", "endless loop the same sequence", _cmd, false);
         ValueArg<int> startFrameArg("", "start_frame", "starting frame idx (starting at 1 for the first frame)", false, 1, "integer", _cmd);
         SwitchArg dummySequenceSw("", "mock_sequence", "Instead of processing a regular sequence, a dummy sequence is used to evaluate run time performance.", _cmd, false);
-        _tracker = parseTrackerParas(_cmd, argc, argv);
+        parseTrackerParas(_cmd, argc, argv);
 
         paras.device = deviceIdArg.getValue();
         paras.sequencePath = seqPathArg.getValue();
@@ -121,19 +130,24 @@ Parameters TrackerRun::parseCmdArgs(int argc, const char** argv)
         paras.paused = pausedSw.getValue();
         paras.repeat = repeatSw.getValue();
         paras.startFrame = startFrameArg.getValue();
+        paras.saveVideo = noSaveVideoSw.getValue();
+        paras.videoScale = videoScaleArg.getValue();
 
-        stringstream initBbSs(initBbArg.getValue());
+		for (const auto& t : initBbArg.getValue())
+		{
+			stringstream initBbSs(t);
 
-        double initBb[4];
+			double initBb[4];
 
-        for (int i = 0; i < 4; ++i)
-        {
-            string singleValueStr;
-            getline(initBbSs, singleValueStr, ',');
-            initBb[i] = static_cast<double>(stod(singleValueStr.c_str()));
-        }
+			for (int i = 0; i < 4; ++i)
+			{
+				string singleValueStr;
+				getline(initBbSs, singleValueStr, ',');
+				initBb[i] = static_cast<double>(stod(singleValueStr.c_str()));
+			}
 
-        paras.initBb = Rect_<double>(initBb[0], initBb[1], initBb[2], initBb[3]);
+			paras.initBbs.push_back(Rect_<double>(initBb[0], initBb[1], initBb[2], initBb[3]));
+		}
 
         if (_debug != 0)
             _debug->init(paras.outputFilePath + "_debug");
@@ -158,6 +172,17 @@ Parameters TrackerRun::parseCmdArgs(int argc, const char** argv)
 bool TrackerRun::start(int argc, const char** argv)
 {
     _paras = parseCmdArgs(argc, argv);
+    if (_paras.saveVideo && _paras.videoName.empty())
+    {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        std::stringstream ss;
+        ss << setfill('0') << setw(4) << st.wYear;
+        ss << setw(2) << st.wMonth << st.wDay;
+        ss << setw(2) << st.wHour << st.wMinute << st.wSecond;
+        ss << setw(3) << st.wMilliseconds << ".avi";
+        _paras.videoName = ss.str();
+    }
 
     while (true)
     {
@@ -169,8 +194,11 @@ bool TrackerRun::start(int argc, const char** argv)
         if (!_paras.repeat || _exit)
             break;
 
-        _boundingBox = _paras.initBb;
-        _isTrackerInitialzed = false;
+		for (auto& t : _trackers)
+		{
+			t._isTrackerInitialzed = false;
+			t._hasInitBox = false;
+		}
     }
 
     return true;
@@ -226,11 +254,11 @@ bool TrackerRun::init()
         _resultsFile.precision(std::numeric_limits<double>::digits10 - 4);
     }
 
-    if (_paras.initBb.width > 0 || _paras.initBb.height > 0)
-    {
-        _boundingBox = _paras.initBb;
-        _hasInitBox = true;
-    }
+	for (size_t i = 0; i < _paras.initBbs.size() && i < _trackers.size(); i++)
+	{
+		_trackers[i]._hasInitBox = true;
+		_trackers[i]._boundingBox = _paras.initBbs[i];
+	}
 
     _isPaused = _paras.paused;
     _frameIdx = 0;
@@ -275,80 +303,40 @@ bool TrackerRun::update()
         ++_frameIdx;
     }
 
-    if (!_isTrackerInitialzed)
-    {
-        if (!_hasInitBox)
-        {
-            Rect box;
+	tStart = getTickCount();
 
-            if (!InitBoxSelector::selectBox(_image, box))
-                return false;
-
-            _boundingBox = Rect_<double>(static_cast<double>(box.x),
-                static_cast<double>(box.y),
-                static_cast<double>(box.width),
-                static_cast<double>(box.height));
-
-            _hasInitBox = true;
-        }
-
-        tStart = getTickCount();
-        _targetOnFrame = _tracker->reinit(_image, _boundingBox);
-        tDuration = getTickCount() - tStart;
-
-        if (_targetOnFrame)
-            _isTrackerInitialzed = true;
-    }
-    else if (_isTrackerInitialzed && (!_isPaused || _isStep))
+	if (!reinitTrackers())
+	{
+		return false;
+	}
+    else if (!_isPaused || _isStep)
     {
         _isStep = false;
-
-        if (_updateAtPos)
-        {
-            Rect box;
-
-            if (!InitBoxSelector::selectBox(_image, box))
-                return false;
-
-            _boundingBox = Rect_<double>(static_cast<double>(box.x),
-                static_cast<double>(box.y),
-                static_cast<double>(box.width),
-                static_cast<double>(box.height));
-
-            _updateAtPos = false;
-
-            std::cout << "UpdateAt_: " << _boundingBox << std::endl;
-            tStart = getTickCount();
-            _targetOnFrame = _tracker->updateAt(_image, _boundingBox);
-            tDuration = getTickCount() - tStart;
-
-            if (!_targetOnFrame)
-                std::cout << "Target not found!" << std::endl;
-        }
+		if (_updateAtPos)
+		{
+			if (!updateAtTrackers())
+			{
+				return false;
+			}
+			_updateAtPos = false;
+		}
         else
         {
-            tStart = getTickCount();
-            _targetOnFrame = _tracker->update(_image, _boundingBox);
-            tDuration = getTickCount() - tStart;
+			updateTrackers();
         }
     }
+    tDuration = getTickCount() - tStart;
 
     double fps = static_cast<double>(getTickFrequency() / tDuration);
-    printResults(_boundingBox, _targetOnFrame, fps);
-
-    if (_paras.showOutput)
+    if (_paras.showOutput || _paras.saveVideo)
     {
         Mat hudImage;
         _image.copyTo(hudImage);
-        rectangle(hudImage, _boundingBox, Scalar(0, 0, 255), 2);
-        Point_<double> center;
-        center.x = _boundingBox.x + _boundingBox.width / 2;
-        center.y = _boundingBox.y + _boundingBox.height / 2;
-        circle(hudImage, center, 3, Scalar(0, 0, 255), 2);
+		drawTrackers(hudImage);
 
-        stringstream ss;
-        ss << "FPS: " << fps;
-        putText(hudImage, ss.str(), Point(20, 20), FONT_HERSHEY_TRIPLEX, 0.5, Scalar(255, 0, 0));
+		stringstream ss;
+		ss << "FPS: " << fps;
+		putText(hudImage, ss.str(), Point(20, 20), FONT_HERSHEY_TRIPLEX, 0.5, Scalar(255, 0, 0));
 
         ss.str("");
         ss.clear();
@@ -357,18 +345,6 @@ bool TrackerRun::update()
 
         if (_debug != 0)
             _debug->printOnImage(hudImage);
-
-        if (!_targetOnFrame)
-        {
-            cv::Point_<double> tl = _boundingBox.tl();
-            cv::Point_<double> br = _boundingBox.br();
-
-            line(hudImage, tl, br, Scalar(0, 0, 255));
-            line(hudImage, cv::Point_<double>(tl.x, br.y),
-                cv::Point_<double>(br.x, tl.y), Scalar(0, 0, 255));
-        }
-
-        imshow(_windowTitle.c_str(), hudImage);
 
         if (!_paras.imgExportPath.empty())
         {
@@ -386,31 +362,50 @@ bool TrackerRun::update()
             }
         }
 
-        char c = (char)waitKey(10);
-
-        if (c == 27)
+        if (_paras.saveVideo)
         {
-            _exit = true;
-            return false;
+            cv::Mat frame;
+            cv::resize(hudImage, frame, cv::Size(), _paras.videoScale, _paras.videoScale);
+            cf_tracking::TrackerDebug::recordVideo(hudImage, _paras.videoName);
         }
 
-        switch (c)
+        if (_paras.showOutput)
         {
-        case 'p':
-            _isPaused = !_isPaused;
-            break;
-        case 'c':
-            _isStep = true;
-            break;
-        case 'r':
-            _hasInitBox = false;
-            _isTrackerInitialzed = false;
-            break;
-        case 't':
-            _updateAtPos = true;
-            break;
-        default:
-            ;
+            imshow(_windowTitle.c_str(), hudImage);
+            char c = (char)waitKey(10);
+
+            if (c == 27)
+            {
+                _exit = true;
+                return false;
+            }
+
+            switch (c)
+            {
+            case 'p':
+                _isPaused = !_isPaused;
+                break;
+            case 'c':
+                _isStep = true;
+                break;
+            case 'r':
+                for (auto& t : _trackers)
+                {
+                    t._isTrackerInitialzed = false;
+                    t._hasInitBox = false;
+                }
+                for (size_t i = 0; i < _paras.initBbs.size() && i < _trackers.size(); i++)
+                {
+                    _trackers[i]._hasInitBox = true;
+                    _trackers[i]._boundingBox = _paras.initBbs[i];
+                }
+                break;
+            case 't':
+                _updateAtPos = true;
+                break;
+            default:
+                ;
+            }
         }
     }
 
@@ -437,6 +432,163 @@ void TrackerRun::printResults(const cv::Rect_<double>& boundingBox, bool isConfi
         if (_debug != 0)
             _debug->printToFile();
     }
+}
+
+
+bool TrackerRun::reinitTrackers()
+{
+	vector<Rect> boxes;
+	for (auto& t : _trackers)
+	{
+		if (!t._isTrackerInitialzed)
+		{
+			if (!t._hasInitBox)
+			{
+				Rect box;
+				if (!InitBoxSelector::selectBox(_image, box, boxes))
+					return false;
+
+				std::cout << "selected box shape: " << box << std::endl;
+
+				t._boundingBox = Rect_<double>(static_cast<double>(box.x),
+					static_cast<double>(box.y),
+					static_cast<double>(box.width),
+					static_cast<double>(box.height));
+
+				t._hasInitBox = true;
+			}
+
+			if (t._tracker)
+				t._targetOnFrame = t._tracker->reinit(_image, t._boundingBox);
+			else
+				t._targetOnFrame = false;
+
+			if (t._targetOnFrame)
+				t._isTrackerInitialzed = true;
+		}
+
+		if (t._isTrackerInitialzed)
+		{
+			boxes.push_back(t._boundingBox);
+		}
+		else
+		{
+			boxes.push_back(cv::Rect());
+		}
+	}
+	return true;
+}
+
+
+bool TrackerRun::updateAtTrackers()
+{
+	vector<Rect> boxes;
+	for (auto& t : _trackers)
+	{
+		Rect box;
+
+		if (!InitBoxSelector::selectBox(_image, box, boxes))
+			return false;
+
+		boxes.push_back(box);
+		t._boundingBox = Rect_<double>(static_cast<double>(box.x),
+			static_cast<double>(box.y),
+			static_cast<double>(box.width),
+			static_cast<double>(box.height));
+
+		std::cout << "UpdateAt_: " << t._boundingBox << std::endl;
+
+		if (t._tracker)
+			t._targetOnFrame = t._tracker->updateAt(_image, t._boundingBox);
+		else
+			t._targetOnFrame = false;
+
+		if (!t._targetOnFrame)
+			std::cout << "Target not found!" << std::endl;
+	}
+	return true;
+}
+
+
+void TrackerRun::updateTrackers()
+{
+	unique_lock<mutex> lck{ _mtx };
+	_cnt = _trackers.size();
+	_cv.notify_all();
+
+	lck.unlock();
+	_cv.wait(unique_lock<mutex>{mutex{}}, [this]() { return _cnt == 0; });
+}
+
+
+void TrackerRun::drawTrackers(cv::Mat img)
+{
+	for (auto& t : _trackers)
+	{
+		rectangle(img, t._boundingBox, Scalar(0, 0, 255), 2);
+		Point_<double> center;
+		center.x = t._boundingBox.x + t._boundingBox.width / 2;
+		center.y = t._boundingBox.y + t._boundingBox.height / 2;
+		circle(img, center, 3, Scalar(0, 0, 255), 2);
+		if (!t._targetOnFrame)
+		{
+			cv::Point_<double> tl = t._boundingBox.tl();
+			cv::Point_<double> br = t._boundingBox.br();
+
+			line(img, tl, br, Scalar(0, 0, 255));
+			line(img, cv::Point_<double>(tl.x, br.y),
+				cv::Point_<double>(br.x, tl.y), Scalar(0, 0, 255));
+		}
+	}
+}
+
+
+void TrackerRun::startTrackers()
+{
+	for (auto& t : _trackers)
+	{
+		t._thread = thread{ [this, &t]() {
+			while (!_exit)
+			{
+				unique_lock<mutex> lck{ _mtx };
+				_cv.wait(lck, [this]() { return _cnt == _trackers.size(); });
+				lck.unlock();
+
+				if (_exit) break;
+
+				if (t._tracker)
+					t._targetOnFrame = t._tracker->update(_image, t._boundingBox);
+				else
+					t._targetOnFrame = false;
+
+				_cnt--;
+				_cv.notify_all();
+			}
+		} };
+	}
+}
+
+void TrackerRun::stopTrackers()
+{
+	_exit = true;
+	for (auto&t : _trackers)
+	{
+		unique_lock<mutex> lck(_mtx);
+		_cnt = _trackers.size();
+		_cv.notify_all();
+		lck.unlock();
+
+		for (auto& t : _trackers)
+		{
+			if (t._thread.joinable())
+				t._thread.join();
+
+			if (t._tracker)
+				delete t._tracker;
+			
+			t._tracker = 0;
+		}
+	}
 }
 
 void TrackerRun::setTrackerDebug(cf_tracking::TrackerDebug* debug)

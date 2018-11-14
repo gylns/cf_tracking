@@ -51,6 +51,7 @@
 */
 
 #include "init_box_selector.hpp"
+#include <vector>
 
 void InitBoxSelector::onMouse(int event, int x, int y, int, void*)
 {
@@ -85,11 +86,15 @@ void InitBoxSelector::onMouse(int event, int x, int y, int, void*)
     }
 }
 
-bool InitBoxSelector::selectBox(cv::Mat& frame, cv::Rect& initBox)
+bool InitBoxSelector::selectBox(cv::Mat& frame, cv::Rect& initBox, std::vector<cv::Rect>& boxes)
 {
     frame.copyTo(image);
     startSelection = false;
     selectObject = false;
+	for (auto& b : boxes)
+	{
+		cv::rectangle(image, b, cv::Scalar(0, 0, 255), 2, 1);
+	}
     cv::imshow(windowTitle.c_str(), image);
     cv::setMouseCallback(windowTitle.c_str(), onMouse, 0);
 

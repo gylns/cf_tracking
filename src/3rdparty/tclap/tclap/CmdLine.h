@@ -470,10 +470,10 @@ inline void CmdLine::parse(std::vector<std::string>& args)
 			if ( !matched && _emptyCombined( args[i] ) )
 				matched = true;
 
-			if ( !matched && !Arg::ignoreRest() )
-				throw(CmdLineParseException("Couldn't find match "
-				                            "for argument",
-				                            args[i]));
+			//if ( !matched && !Arg::ignoreRest() )
+			//	throw(CmdLineParseException("Couldn't find match "
+			//	                            "for argument",
+			//	                            args[i]));
 		}
 
 		if ( requiredCount < _numRequired )

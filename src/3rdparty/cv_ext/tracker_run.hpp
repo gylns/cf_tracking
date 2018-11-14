@@ -63,25 +63,34 @@
 #include "tracker_debug.hpp"
 #include "dsst_tracker.hpp"
 #include "image_acquisition.hpp"
+#include <vector>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 struct Parameters{
     std::string sequencePath;
     std::string outputFilePath;
     std::string imgExportPath;
     std::string expansion;
-    cv::Rect initBb;
+    std::string videoName;
+    std::vector<cv::Rect> initBbs;
     int device;
     int startFrame;
     bool showOutput;
+    bool saveVideo;
     bool paused;
     bool repeat;
     bool isMockSequence;
+    double videoScale;
 };
 
 class TrackerRun
 {
 public:
-    TrackerRun(std::string windowTitle, ImageAcquisition& cap);
+	TrackerRun(ImageAcquisition& cap, size_t n, std::string windowTitle);
+    TrackerRun(ImageAcquisition& cap, std::vector<cv::Rect>& boxes, std::string windowTitle);
     virtual ~TrackerRun();
     bool start(int argc, const char** argv);
     void setTrackerDebug(cf_tracking::TrackerDebug* debug);
@@ -92,15 +101,30 @@ private:
     bool run();
     bool update();
     void printResults(const cv::Rect_<double>& boundingBox, bool isConfident, double fps);
+	bool reinitTrackers();
+	bool updateAtTrackers();
+	void updateTrackers();
+	void drawTrackers(cv::Mat img);
+	void startTrackers();
+	void stopTrackers();
 
 protected:
-    virtual cf_tracking::CfTracker* parseTrackerParas(TCLAP::CmdLine& cmd, int argc, const char** argv) = 0;
+    virtual void parseTrackerParas(TCLAP::CmdLine& cmd, int argc, const char** argv) = 0;
+	struct _Tracker
+	{
+		cf_tracking::CfTracker* _tracker = 0;
+		cv::Rect_<double> _boundingBox;
+		bool _hasInitBox = false;
+		bool _isTrackerInitialzed = false;
+		bool _targetOnFrame = false;
+		std::thread _thread;
+	};
+	std::vector<_Tracker> _trackers;
+
 private:
     cv::Mat _image;
-    cf_tracking::CfTracker* _tracker;
     std::string _windowTitle;
     Parameters _paras;
-    cv::Rect_<double> _boundingBox;
     ImageAcquisition& _cap;
     std::ofstream _resultsFile;
     TCLAP::CmdLine _cmd;
@@ -109,10 +133,10 @@ private:
     bool _isPaused = false;
     bool _isStep = false;
     bool _exit = false;
-    bool _hasInitBox = false;
-    bool _isTrackerInitialzed = false;
-    bool _targetOnFrame = false;
     bool _updateAtPos = false;
+	std::atomic<size_t> _cnt;
+	std::mutex _mtx;
+	std::condition_variable _cv;
 };
 
 #endif

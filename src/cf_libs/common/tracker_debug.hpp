@@ -32,6 +32,8 @@
 #ifndef TRACKER_DEBUG_HPP_
 #define TRACKER_DEBUG_HPP_
 
+#include <opencv2/videoio.hpp>
+
 namespace cf_tracking
 {
     class TrackerDebug
@@ -43,6 +45,30 @@ namespace cf_tracking
         virtual void printOnImage(cv::Mat& image) = 0;
         virtual void printConsoleOutput() = 0;
         virtual void printToFile() = 0;
+        static void recordVideo(cv::Mat image, std::string videoPath)
+        {
+            static cv::VideoWriter recorder;
+            static std::string path;
+            const int fourcc = cv::VideoWriter::fourcc('X', 'V', 'I', 'D');
+            if (!recorder.isOpened() && !videoPath.empty() && !image.empty())
+            {
+                path = videoPath;
+                recorder.open(path, fourcc, 25., image.size());
+            }
+            if (recorder.isOpened())
+            {
+                if (path == videoPath)
+                {
+                    recorder << image;
+                }
+                else
+                {
+                    recorder.release();
+                    path = "";
+                    recordVideo(image, videoPath);
+                }
+            }
+        }
     };
 }
 

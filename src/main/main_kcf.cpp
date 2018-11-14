@@ -34,18 +34,22 @@
 #include "kcf_tracker.hpp"
 #include "tracker_run.hpp"
 #include "kcf_debug.hpp"
+#include "detector.hpp"
 
 class KcfTrackerRun : public TrackerRun
 {
 public:
-    KcfTrackerRun() : TrackerRun("KCFcpp")
+    KcfTrackerRun(ImageAcquisition& cap, size_t n) : TrackerRun(cap, n, "KCFcpp")
     {}
+
+	KcfTrackerRun(ImageAcquisition& cap, std::vector<cv::Rect>& boxes) : TrackerRun(cap, boxes, "KCFcpp")
+	{}
 
     virtual ~KcfTrackerRun()
     {
     }
 
-    virtual cf_tracking::CfTracker* parseTrackerParas(TCLAP::CmdLine& cmd, int argc, const char** argv)
+    virtual void parseTrackerParas(TCLAP::CmdLine& cmd, int argc, const char** argv)
     {
         cf_tracking::KcfParameters paras;
         TCLAP::SwitchArg debugOutput("v", "debug", "Output Debug info!", cmd, false);
@@ -125,13 +129,10 @@ public:
             paras.useFhogTranspose = false;
         }
 
-        if (debugOutput.getValue())
-        {
-            setTrackerDebug(&_debug);
-            return new cf_tracking::KcfTracker(paras, &_debug);
-        }
-
-        return new cf_tracking::KcfTracker(paras);
+		for (auto& t : _trackers)
+		{
+			t._tracker = new cf_tracking::KcfTracker(paras);
+		}
     }
 
 private:
@@ -140,7 +141,38 @@ private:
 
 int main(int argc, const char** argv)
 {
-    KcfTrackerRun mainObj;
+	ImageAcquisition cap;
+	ImgAcqParas paras;
+	TCLAP::CmdLine cmd("Kcf");
+
+	TCLAP::ValueArg<std::string> seqPathArg("s", "seq", "Path to sequence", false, "", "path", cmd);
+	TCLAP::ValueArg<std::string> cfgPathArg("", "yolo_cfg", "Path to YOLO config file", false, "my-yolov3.cfg", "path", cmd);
+	TCLAP::ValueArg<std::string> modelPathArg("", "yolo_model", "Path to YOLO model file", false, "my-yolov3_final.weights", "path", cmd);
+
+	cmd.parse(argc, argv);
+	paras.sequencePath = seqPathArg.getValue();
+	cap.open(paras);
+
+	if (!cap.isOpened())
+	{
+		std::cerr << "capture failed open" << std::endl;
+		return 1;
+	}
+
+	std::vector<cv::Rect> boxes;
+	std::string cfg_file = cfgPathArg.getValue();
+	std::string model_file = modelPathArg.getValue();
+	YOLOModel model(cfg_file, model_file);
+	while (cap.isOpened() && boxes.empty())
+	{
+		cv::Mat frame;
+		cap >> frame;
+		if (frame.empty())
+			return 0;
+		model.detect(frame, boxes);
+	}
+
+    KcfTrackerRun mainObj(cap, boxes);
 
     if (!mainObj.start(argc, argv))
         return -1;

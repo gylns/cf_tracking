@@ -33,17 +33,24 @@
 #include <iostream>
 #include "dsst_tracker.hpp"
 #include "tracker_run.hpp"
+#include "detector.hpp"
+#include <fstream>
 
 class DsstTrackerRun : public TrackerRun
 {
 public:
-    DsstTrackerRun(ImageAcquisition& cap) : TrackerRun("DSSTcpp", cap)
+    DsstTrackerRun(ImageAcquisition& cap, size_t n)
+        : TrackerRun(cap, n, "DSSTcpp")
     {}
+
+	DsstTrackerRun(ImageAcquisition& cap, std::vector<cv::Rect>& boxes, std::vector<std::string>& labels = std::vector<std::string>())
+        : TrackerRun(cap, boxes, "DSSTcpp")
+	{}
 
     virtual ~DsstTrackerRun()
     {}
 
-    virtual cf_tracking::CfTracker* parseTrackerParas(TCLAP::CmdLine& cmd, int argc, const char** argv)
+    virtual void parseTrackerParas(TCLAP::CmdLine& cmd, int argc, const char** argv)
     {
         cf_tracking::DsstParameters paras;
         TCLAP::SwitchArg debugOutput("v", "debug", "Output Debug info!", cmd, false);
@@ -115,30 +122,88 @@ public:
             paras.resizeType = cv::INTER_AREA;
         }
 
-        if (debugOutput.getValue())
-        {
-            setTrackerDebug(&_debug);
-            return new cf_tracking::DsstTracker(paras, &_debug);
-        }
-
-        return new cf_tracking::DsstTracker(paras);
+		for (auto& t: _trackers)
+		{
+			t._tracker = new cf_tracking::DsstTracker(paras);
+		}
     }
 
 private:
     cf_tracking::DsstDebug<cf_tracking::DsstTracker::T> _debug;
 };
 
+
+void ReadLabels(std::vector<std::string>& labels, const std::string& labelPath)
+{
+    labels.clear();
+    std::ifstream ifs(labelPath);
+    if (ifs.is_open())
+    {
+        while (ifs)
+        {
+            std::string lbl;
+            ifs >> lbl;
+            if (!lbl.empty())
+            {
+                labels.push_back(lbl);
+            }
+        }
+    }
+}
+
 int main(int argc, const char** argv)
 {
 	ImageAcquisition cap;
 	ImgAcqParas paras;
 	TCLAP::CmdLine cmd("DSST");
+
 	TCLAP::ValueArg<std::string> seqPathArg("s", "seq", "Path to sequence", false, "", "path", cmd);
+	TCLAP::ValueArg<std::string> cfgPathArg("", "yolo_cfg", "Path to YOLO config file", false, "my-yolov3.cfg", "path", cmd);
+	TCLAP::ValueArg<std::string> modelPathArg("", "yolo_model", "Path to YOLO model file", false, "my-yolov3_final.weights", "path", cmd);
+    TCLAP::ValueArg<std::string> labelPathArg("", "yolo_label", "Path to YOLO label file", false, "my-voc.names", "path", cmd);
+
 	cmd.parse(argc, argv);
 	paras.sequencePath = seqPathArg.getValue();
 	cap.open(paras);
 
-    DsstTrackerRun mainObj(cap);
+	if (!cap.isOpened())
+	{
+		std::cerr << "capture failed open" << std::endl;
+		return 1;
+	}
+
+    std::vector<DResult> results;
+	std::string cfg_file = cfgPathArg.getValue();
+	std::string model_file = modelPathArg.getValue();
+    std::string label_file = labelPathArg.getValue();
+	YOLOModel model(cfg_file, model_file);
+	while (cap.isOpened() && results.empty())
+	{
+		cv::Mat frame;
+		cap >> frame;
+		if (frame.empty())
+			return 0;
+		model.detect(frame, results);
+	}
+    std::vector<std::string> names;
+    ReadLabels(names, label_file);
+	std::vector<cv::Rect> boxes;
+    std::vector<cv::String> labels;
+
+    for (const auto& r : results)
+    {
+        boxes.push_back(r.box);
+        if (r.cls >= 0 && r.cls < names.size())
+        {
+            labels.push_back(names[r.cls]);
+        }
+        else
+        {
+            labels.push_back("unkown" + std::to_string(r.cls));
+        }
+    }
+
+    DsstTrackerRun mainObj(cap, boxes);
 
     if (!mainObj.start(argc, argv))
         return -1;

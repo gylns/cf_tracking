@@ -75,7 +75,9 @@ struct Parameters{
     std::string imgExportPath;
     std::string expansion;
     std::string videoName;
+    std::string logName;
     std::vector<cv::Rect> initBbs;
+    std::vector<std::string> initLabels;
     int device;
     int startFrame;
     bool showOutput;
@@ -90,7 +92,7 @@ class TrackerRun
 {
 public:
 	TrackerRun(ImageAcquisition& cap, size_t n, std::string windowTitle);
-    TrackerRun(ImageAcquisition& cap, std::vector<cv::Rect>& boxes, std::string windowTitle);
+    TrackerRun(ImageAcquisition& cap, std::vector<cv::Rect>& boxes, std::vector<std::string>& labels, std::string windowTitle);
     virtual ~TrackerRun();
     bool start(int argc, const char** argv);
     void setTrackerDebug(cf_tracking::TrackerDebug* debug);
@@ -134,9 +136,55 @@ private:
     bool _isStep = false;
     bool _exit = false;
     bool _updateAtPos = false;
-	std::atomic<size_t> _cnt;
+	std::atomic<size_t> _cnt1;
+	std::atomic<size_t> _cnt2;
 	std::mutex _mtx;
 	std::condition_variable _cv;
+    void _trackLog(std::string logPath)
+    {
+        static std::string _logPath;
+        static std::ofstream _ofs;
+        if (!_ofs.is_open() && _logPath.empty())
+        {
+            _logPath = logPath;
+            _ofs.open(_logPath);
+        }
+        if (_ofs.is_open())
+        {
+            if (_logPath == logPath)
+            {
+                if (_frameIdx == 1)
+                {
+                    _ofs << "帧数," << "中心x," << "中心y," << "区域宽," << "区域高,";
+                    _ofs << "偏移x," << "偏移y," << "标签" << std::endl;
+                }
+                for (size_t i = 0; i < _trackers.size(); i++)
+                {
+                    _ofs << _frameIdx << ",";
+                    auto& t = _trackers[i];
+                    auto& t0 = _paras.initBbs[i];
+                    auto cx = t._boundingBox.x + t._boundingBox.width / 2;
+                    auto cy = t._boundingBox.y + t._boundingBox.height / 2;
+                    auto cx0 = t0.x + t0.width / 2;
+                    auto cy0 = t0.y + t0.height / 2;
+                    _ofs << (int)cx << ",";
+                    _ofs << (int)cy << ",";
+                    _ofs << (int)t._boundingBox.width << ",";
+                    _ofs << (int)t._boundingBox.height << ",";
+                    _ofs << (int)(cx - cx0) << ",";
+                    _ofs << (int)(cy - cy0) << ",";
+                    _ofs << _paras.initLabels[i];
+                    _ofs << std::endl;
+                }
+            }
+            else
+            {
+                _ofs.close();
+                _logPath = "";
+                _trackLog(logPath);
+            }
+        }
+    }
 };
 
 #endif

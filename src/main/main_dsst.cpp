@@ -44,7 +44,7 @@ public:
     {}
 
 	DsstTrackerRun(ImageAcquisition& cap, std::vector<cv::Rect>& boxes, std::vector<std::string>& labels = std::vector<std::string>())
-        : TrackerRun(cap, boxes, "DSSTcpp")
+        : TrackerRun(cap, boxes, labels, "DSSTcpp")
 	{}
 
     virtual ~DsstTrackerRun()
@@ -146,6 +146,7 @@ void ReadLabels(std::vector<std::string>& labels, const std::string& labelPath)
             if (!lbl.empty())
             {
                 labels.push_back(lbl);
+                std::cout << lbl << std::endl;
             }
         }
     }
@@ -177,6 +178,7 @@ int main(int argc, const char** argv)
 	std::string model_file = modelPathArg.getValue();
     std::string label_file = labelPathArg.getValue();
 	YOLOModel model(cfg_file, model_file);
+    std::cout << "Detecting..." << std::endl;
 	while (cap.isOpened() && results.empty())
 	{
 		cv::Mat frame;
@@ -188,8 +190,7 @@ int main(int argc, const char** argv)
     std::vector<std::string> names;
     ReadLabels(names, label_file);
 	std::vector<cv::Rect> boxes;
-    std::vector<cv::String> labels;
-
+    std::vector<std::string> labels;
     for (const auto& r : results)
     {
         boxes.push_back(r.box);
@@ -203,7 +204,8 @@ int main(int argc, const char** argv)
         }
     }
 
-    DsstTrackerRun mainObj(cap, boxes);
+    std::cout << "Tracking..." << std::endl;
+    DsstTrackerRun mainObj(cap, boxes, labels);
 
     if (!mainObj.start(argc, argv))
         return -1;

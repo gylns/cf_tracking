@@ -72,17 +72,20 @@ _windowTitle(windowTitle),
 _cmd(_windowTitle.c_str(), ' ', "0.1"),
 _debug(0),
 _cap(cap),
-_cnt(0),
+_cnt1(0),
+_cnt2(0),
 _trackers(n)
 {
 	startTrackers();
 }
 
 
-TrackerRun::TrackerRun(ImageAcquisition& cap, std::vector<cv::Rect>& boxes, string windowTitle) :
+TrackerRun::TrackerRun(ImageAcquisition& cap, std::vector<cv::Rect>& boxes, std::vector<string>&labels, string windowTitle) :
 TrackerRun(cap, boxes.size(), windowTitle)
 {
 	_paras.initBbs = boxes;
+    _paras.initLabels = labels;
+    _paras.initLabels.resize(_paras.initBbs.size());
 }
 
 TrackerRun::~TrackerRun()
@@ -130,7 +133,7 @@ Parameters TrackerRun::parseCmdArgs(int argc, const char** argv)
         paras.paused = pausedSw.getValue();
         paras.repeat = repeatSw.getValue();
         paras.startFrame = startFrameArg.getValue();
-        paras.saveVideo = noSaveVideoSw.getValue();
+        paras.saveVideo = !noSaveVideoSw.getValue();
         paras.videoScale = videoScaleArg.getValue();
 
 		for (const auto& t : initBbArg.getValue())
@@ -180,8 +183,9 @@ bool TrackerRun::start(int argc, const char** argv)
         ss << setfill('0') << setw(4) << st.wYear;
         ss << setw(2) << st.wMonth << st.wDay;
         ss << setw(2) << st.wHour << st.wMinute << st.wSecond;
-        ss << setw(3) << st.wMilliseconds << ".avi";
-        _paras.videoName = ss.str();
+        ss << setw(3) << st.wMilliseconds;// << ".avi";
+        _paras.videoName = ss.str() + ".avi";
+        _paras.logName = ss.str() + ".csv";
     }
 
     while (true)
@@ -301,6 +305,7 @@ bool TrackerRun::update()
             return false;
 
         ++_frameIdx;
+        std::cout << "frame: " << _frameIdx << std::endl;
     }
 
 	tStart = getTickCount();
@@ -326,6 +331,8 @@ bool TrackerRun::update()
         }
     }
     tDuration = getTickCount() - tStart;
+
+    _trackLog(_paras.logName);
 
     double fps = static_cast<double>(getTickFrequency() / tDuration);
     if (_paras.showOutput || _paras.saveVideo)
@@ -513,23 +520,46 @@ bool TrackerRun::updateAtTrackers()
 void TrackerRun::updateTrackers()
 {
 	unique_lock<mutex> lck{ _mtx };
-	_cnt = _trackers.size();
+    _cnt2 = 0;
+	_cnt1 = _trackers.size();
 	_cv.notify_all();
-
 	lck.unlock();
-	_cv.wait(unique_lock<mutex>{mutex{}}, [this]() { return _cnt == 0; });
+
+    //_cv.wait(std::unique_lock<std::mutex>{std::mutex{}}, [this]() { return _cnt1 == 0; });
+
+    lck.lock();
+    std::cout << "wait tracking..." << std::endl;
+	_cv.wait(lck, [this]() { return _cnt1 == 0; });
+    std::cout << "track done" << std::endl;
+    lck.unlock();
 }
 
 
 void TrackerRun::drawTrackers(cv::Mat img)
 {
-	for (auto& t : _trackers)
+    for (size_t i = 0; i < _trackers.size(); i++)
 	{
+        auto& t = _trackers[i];
 		rectangle(img, t._boundingBox, Scalar(0, 0, 255), 2);
 		Point_<double> center;
 		center.x = t._boundingBox.x + t._boundingBox.width / 2;
 		center.y = t._boundingBox.y + t._boundingBox.height / 2;
 		circle(img, center, 3, Scalar(0, 0, 255), 2);
+
+        int cx = (int)center.x;
+        int cy = (int)center.y;
+        int x = (int)t._boundingBox.x;
+        int y = (int)t._boundingBox.y;
+        int w = (int)t._boundingBox.width;
+        int h = (int)t._boundingBox.height;
+        std::stringstream ss;
+        ss << "(" << cx << "," << cy << ")";
+        putText(img, ss.str(), Point(cx+10, cy), FONT_HERSHEY_TRIPLEX, 0.5, Scalar(255, 0, 0));
+
+        ss.str("");
+        ss << "w:" << w << ", h:" << h << " " << _paras.initLabels[i];
+        putText(img, ss.str(), Point(x,y-3), FONT_HERSHEY_TRIPLEX, 0.5, Scalar(255, 0, 0));
+
 		if (!t._targetOnFrame)
 		{
 			cv::Point_<double> tl = t._boundingBox.tl();
@@ -551,18 +581,43 @@ void TrackerRun::startTrackers()
 			while (!_exit)
 			{
 				unique_lock<mutex> lck{ _mtx };
-				_cv.wait(lck, [this]() { return _cnt == _trackers.size(); });
+                std::cout << t._thread.get_id() << " wait _cnt1 " << _cnt1 << std::endl;
+				_cv.wait(lck, [this]() { return _cnt1 == _trackers.size(); });
+                std::cout << t._thread.get_id() << " wait _cnt1 done " << _cnt1 << std::endl;
 				lck.unlock();
 
 				if (_exit) break;
 
+                //std::cout << t._thread.get_id() << "..." << std::endl;
 				if (t._tracker)
 					t._targetOnFrame = t._tracker->update(_image, t._boundingBox);
 				else
 					t._targetOnFrame = false;
+                //std::cout << t._thread.get_id() << "!!!" << std::endl;
 
-				_cnt--;
-				_cv.notify_all();
+                //lck.lock();
+				//_cnt1--;
+                //std::cout << "cnt: " << _cnt << std::endl;
+				//_cv.notify_all();
+                //lck.unlock();
+
+                lck.lock();
+                _cv.notify_all();
+                _cnt2++;
+                if (_cnt2 < _trackers.size())
+                {
+                    cout << t._thread.get_id() <<  " wait _cnt2 " << _cnt2 << std::endl;
+                    _cv.wait(lck, [this]() { return _cnt2 == _trackers.size(); });
+                    cout << t._thread.get_id() << " wait _cnt2 done " << _cnt2 << std::endl;
+                }
+                else
+                {
+                    _cv.notify_all();
+                }
+                lck.unlock();
+
+                _cnt1 = 0;
+                _cv.notify_all();
 			}
 		} };
 	}
@@ -574,7 +629,7 @@ void TrackerRun::stopTrackers()
 	for (auto&t : _trackers)
 	{
 		unique_lock<mutex> lck(_mtx);
-		_cnt = _trackers.size();
+		_cnt1 = _trackers.size();
 		_cv.notify_all();
 		lck.unlock();
 

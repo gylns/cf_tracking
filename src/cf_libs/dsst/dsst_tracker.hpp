@@ -50,8 +50,7 @@ References:
 in Proc. BMVC, 2014.
 
 [2] D. Bolme, et al.,
-“Visual Object Tracking using Adaptive Correlation Filters,”
-in Proc. CVPR, 2010.
+“Visual Object Tracking using Adaptive Correlation Filters,?in Proc. CVPR, 2010.
 */
 
 #ifndef DSST_TRACKER_HPP_

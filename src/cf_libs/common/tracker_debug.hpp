@@ -49,7 +49,9 @@ namespace cf_tracking
         {
             static cv::VideoWriter recorder;
             static std::string path;
-            const int fourcc = cv::VideoWriter::fourcc('X', 'V', 'I', 'D');
+            //const int fourcc = cv::VideoWriter::fourcc('X', 'V', 'I', 'D');
+            const int fourcc = cv::VideoWriter::fourcc('D', 'I', 'V', 'X');
+            //const int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
             if (!recorder.isOpened() && !videoPath.empty() && !image.empty())
             {
                 path = videoPath;
